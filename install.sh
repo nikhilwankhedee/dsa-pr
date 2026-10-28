@@ -1,8 +1,7 @@
 #!/usr/bin/env bash
 
-REPO_URL="git@github.com:nikhilwankhedee/dsa-pr.git"
-REPO_HTTPS_URL="https://github.com/nikhilwankhedee/dsa-pr.git"
-RAW_BASE="https://raw.githubusercontent.com/nikhilwankhedee/dsa-pr/main"
+REPO="nikhilwankhedee/dsa-pr"
+RAW_BASE="https://raw.githubusercontent.com/${REPO}/main"
 TARGET_DIR="./dsa-pr"
 
 FILES=(
@@ -47,54 +46,77 @@ NAMES=(
   "18) Queue using Linked List"
 )
 
+# Function to read from /dev/tty for curl | bash compatibility
+read_tty() {
+  local prompt="$1"
+  local varname="$2"
+  if [ -t 0 ]; then
+    read -p "$prompt" "$varname"
+  elif [ -r /dev/tty ]; then
+    read -p "$prompt" "$varname" </dev/tty
+  else
+    # Last resort - but should not happen in normal interactive use
+    eval "$varname=''"
+  fi
+}
+
+download_file() {
+  local url="$1"
+  local dest="$2"
+  local name="$(basename "$dest")"
+  
+  mkdir -p "$(dirname "$dest")"
+  echo "[INFO] Saving file at: $dest"
+  
+  if command -v curl >/dev/null 2>&1; then
+    if curl -fsSL "$url" -o "$dest"; then
+      if [ -f "$dest" ] && [ -s "$dest" ]; then
+        echo "[SUCCESS] Saved files at: $dest"
+        return 0
+      fi
+    fi
+  elif command -v wget >/dev/null 2>&1; then
+    if wget -q "$url" -O "$dest"; then
+      if [ -f "$dest" ] && [ -s "$dest" ]; then
+        echo "[SUCCESS] Saved files at: $dest"
+        return 0
+      fi
+    fi
+  fi
+  
+  echo "[ERROR] Failed to download $name from $url"
+  return 1
+}
+
 echo "=========================================="
 echo "DSA PR Programs Installer"
 echo "=========================================="
 echo ""
 
+# Handle existing directory safely - never silently delete
 if [ -d "$TARGET_DIR" ]; then
   echo "[INFO] Directory '$TARGET_DIR' already exists."
-  read -p "Do you want to overwrite/remove it and re-clone? (y/N): " overwrite
-  if [[ "$overwrite" =~ ^[Yy]$ ]]; then
-    echo "[INFO] Removing existing $TARGET_DIR..."
-    rm -rf "$TARGET_DIR"
-  else
-    echo "[INFO] Using existing directory."
+  echo "[INFO] Existing files will not be deleted."
+  read_tty "Do you want to download into this directory anyway? (y/N): " overwrite
+  if [[ ! "$overwrite" =~ ^[Yy]$ ]]; then
+    echo "[INFO] Exiting without changes."
+    exit 0
   fi
-fi
-
-if [ ! -d "$TARGET_DIR" ]; then
-  if command -v git >/dev/null 2>&1; then
-    echo "[INFO] Cloning repo..."
-    echo "[INFO] Repo: $REPO_URL"
-    if git clone "$REPO_URL" "$TARGET_DIR" 2>&1; then
-      echo "[SUCCESS] Repo cloned successfully."
-    else
-      echo "[WARN] SSH clone failed, trying HTTPS..."
-      echo "[INFO] Repo: $REPO_HTTPS_URL"
-      git clone "$REPO_HTTPS_URL" "$TARGET_DIR"
-      if [ $? -eq 0 ]; then
-        echo "[SUCCESS] Repo cloned successfully via HTTPS."
-      else
-        echo "[ERROR] Failed to clone repo."
-        exit 1
-      fi
-    fi
-  else
-    echo "[WARN] git not found. Downloading files directly..."
-    mkdir -p "$TARGET_DIR"
-  fi
+  echo "[INFO] Will download into existing directory (skipping files that already exist)."
+else
+  mkdir -p "$TARGET_DIR"
+  echo "[INFO] Created directory: $TARGET_DIR"
 fi
 
 echo ""
 echo "=========================================="
 echo "Download Options"
 echo "=========================================="
-echo "1) Download ALL programs"
+echo "1) Download ALL programs + README"
 echo "2) Download a SINGLE program"
 echo "3) Exit"
 echo "=========================================="
-read -p "Enter your choice [1-3]: " choice
+read_tty "Enter your choice [1-3]: " choice
 
 if [ "$choice" = "3" ]; then
   echo "[INFO] Exiting..."
@@ -103,46 +125,42 @@ fi
 
 if [ "$choice" = "1" ]; then
   echo ""
-  echo "[INFO] Downloading all programs..."
-  mkdir -p "$TARGET_DIR"
+  echo "[INFO] Downloading all programs and README..."
+  failed=0
   
+  # Download README first
+  download_file "$RAW_BASE/README.md" "$TARGET_DIR/README.md" || failed=$((failed+1))
+  
+  # Download all .cpp files
   for i in "${!FILES[@]}"; do
     file="${FILES[$i]}"
     dest="$TARGET_DIR/$file"
     
-    if [ -f "$dest" ] && [ -d "$TARGET_DIR/.git" ]; then
-      echo "[SKIP] $file already exists (from git clone)"
+    if [ -f "$dest" ]; then
+      echo "[SKIP] $file already exists"
       continue
     fi
     
-    if [ -d "$TARGET_DIR/.git" ]; then
-      echo "[SKIP] $file present from repo"
-      continue
-    fi
-    
-    echo "[INFO] Saving file at: $dest"
-    if command -v curl >/dev/null 2>&1; then
-      curl -fsSL "$RAW_BASE/$file" -o "$dest"
-    elif command -v wget >/dev/null 2>&1; then
-      wget -q "$RAW_BASE/$file" -O "$dest"
-    else
-      echo "[ERROR] Neither curl nor wget found."
-      exit 1
-    fi
-    
-    if [ -f "$dest" ] && [ -s "$dest" ]; then
-      echo "[SUCCESS] Saved files at: $TARGET_DIR/$file"
-    else
-      echo "[ERROR] Failed to download $file"
-    fi
+    download_file "$RAW_BASE/$file" "$dest" || failed=$((failed+1))
   done
   
   echo ""
   echo "=========================================="
-  echo "[DONE] All files saved at: $TARGET_DIR/"
+  if [ $failed -eq 0 ]; then
+    echo "[DONE] All files saved at: $TARGET_DIR/"
+  else
+    echo "[WARNING] $failed file(s) failed to download."
+    echo "[INFO] Files saved at: $TARGET_DIR/"
+  fi
   echo "=========================================="
-  ls -1 "$TARGET_DIR"/*.cpp 2>&1 | wc -l | xargs echo "Total .cpp files:"
+  count=$(ls -1 "$TARGET_DIR"/*.cpp 2>&1 | grep -c '\.cpp$' || echo 0)
+  echo "Total .cpp files: $count"
+  [ -f "$TARGET_DIR/README.md" ] && echo "README.md: present" || echo "README.md: missing"
   echo "=========================================="
+  
+  if [ $failed -gt 0 ]; then
+    exit 1
+  fi
   
 elif [ "$choice" = "2" ]; then
   echo ""
@@ -153,7 +171,7 @@ elif [ "$choice" = "2" ]; then
     echo "$name"
   done
   echo "=========================================="
-  read -p "Enter number [1-18]: " num
+  read_tty "Enter number [1-18]: " num
   
   if ! [[ "$num" =~ ^[0-9]+$ ]] || [ "$num" -lt 1 ] || [ "$num" -gt 18 ]; then
     echo "[ERROR] Invalid selection."
@@ -163,29 +181,16 @@ elif [ "$choice" = "2" ]; then
   idx=$((num - 1))
   file="${FILES[$idx]}"
   dest="$TARGET_DIR/$file"
-  mkdir -p "$TARGET_DIR"
   
-  if [ -d "$TARGET_DIR/.git" ] && [ -f "$dest" ]; then
-    echo "[INFO] File exists from cloned repo: $dest"
+  if [ -f "$dest" ]; then
+    echo "[INFO] File already exists: $dest"
     echo "[DONE] Saved files at: $dest"
     exit 0
   fi
   
-  echo "[INFO] Saving file at: $dest"
-  if command -v curl >/dev/null 2>&1; then
-    curl -fsSL "$RAW_BASE/$file" -o "$dest"
-  elif command -v wget >/dev/null 2>&1; then
-    wget -q "$RAW_BASE/$file" -O "$dest"
-  else
-    echo "[ERROR] Neither curl nor wget found."
-    exit 1
-  fi
-  
-  if [ -f "$dest" ] && [ -s "$dest" ]; then
-    echo "[SUCCESS] Saved file at: $dest"
+  if download_file "$RAW_BASE/$file" "$dest"; then
     echo "[DONE] Saved files at: $TARGET_DIR/"
   else
-    echo "[ERROR] Failed to download $file"
     exit 1
   fi
   
