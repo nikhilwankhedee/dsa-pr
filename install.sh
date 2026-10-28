@@ -1,7 +1,21 @@
 #!/usr/bin/env bash
+# Cross-platform bootstrapper - Unix/Linux/macOS
 
 REPO="nikhilwankhedee/dsa-pr"
 RAW_BASE="https://raw.githubusercontent.com/${REPO}/main"
+
+# Detect if we're actually in PowerShell context (shouldn't happen for bash, but be safe)
+if [ -n "$PSVersionTable" ] || [ -n "$POWERSHELL_DISTRIBUTION_CHANNEL" ]; then
+  # Try to download and run PowerShell installer
+  if command -v powershell >/dev/null 2>&1; then
+    powershell -NoProfile -ExecutionPolicy Bypass -Command "iex ((New-Object System.Net.WebClient).DownloadString('$RAW_BASE/install.ps1'))"
+    exit $?
+  elif command -v pwsh >/dev/null 2>&1; then
+    pwsh -NoProfile -ExecutionPolicy Bypass -Command "iex ((New-Object System.Net.WebClient).DownloadString('$RAW_BASE/install.ps1'))"
+    exit $?
+  fi
+fi
+
 TARGET_DIR="./dsa-pr"
 
 FILES=(
@@ -46,7 +60,6 @@ NAMES=(
   "18) Queue using Linked List"
 )
 
-# Try to read from /dev/tty if available, else read from stdin
 read_input() {
   local prompt="$1"
   local var="$2"
@@ -55,7 +68,7 @@ read_input() {
   elif [ -t 0 ]; then
     read -p "$prompt" "$var"
   else
-    read -p "$prompt" "$var" </dev/stdin 2>/dev/null || read -p "$prompt" "$var"
+    read -p "$prompt" "$var" </dev/stdin 2>/dev/null || { echo -n "$prompt"; read "$var"; }
   fi
 }
 
@@ -66,9 +79,9 @@ download_file() {
   mkdir -p "$(dirname "$dest")"
   echo "[INFO] Saving file at: $dest"
   if command -v curl >/dev/null 2>&1; then
-    curl -fsSL --connect-timeout 30 "$url" -o "$dest" || return 1
+    curl -fsSL --connect-timeout 60 "$url" -o "$dest" || return 1
   elif command -v wget >/dev/null 2>&1; then
-    wget -T 30 -q "$url" -O "$dest" || return 1
+    wget -T 60 -q "$url" -O "$dest" || return 1
   else
     echo "[ERROR] Neither curl nor wget found."
     return 1
@@ -82,7 +95,7 @@ download_file() {
 }
 
 echo "=========================================="
-echo "DSA PR Programs Installer"
+echo "DSA PR Programs Installer (Linux/macOS)"
 echo "=========================================="
 echo ""
 
