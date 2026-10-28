@@ -1,21 +1,27 @@
 #!/usr/bin/env bash
-# Cross-platform bootstrapper - Unix/Linux/macOS
+# Cross-platform bootstrapper - routes to appropriate installer
 
-REPO="nikhilwankhedee/dsa-pr"
-RAW_BASE="https://raw.githubusercontent.com/${REPO}/main"
+RAW_BASE="https://raw.githubusercontent.com/nikhilwankhedee/dsa-pr/main"
 
-# Detect if we're actually in PowerShell context (shouldn't happen for bash, but be safe)
-if [ -n "$PSVersionTable" ] || [ -n "$POWERSHELL_DISTRIBUTION_CHANNEL" ]; then
-  # Try to download and run PowerShell installer
+# Detect PowerShell on Windows/cross-platform
+if [ -n "$PSModulePath" ] || [ -n "$POWERSHELL_DISTRIBUTION_CHANNEL" ] || command -v pwsh >/dev/null 2>&1 || command -v powershell >/dev/null 2>&1; then
+  if [ "$(uname -s 2>/dev/null)" = "Linux" ] || [ "$(uname -s 2>/dev/null)" = "Darwin" ] || [ -z "$(uname -s 2>/dev/null)" ]; then
+    : # might be WSL or unknown, but prefer bash unless explicitly in PS
+  fi
+fi
+
+# If running under PowerShell (heavier check), switch to PS installer
+if [ -n "$PSHOME" ] || [ "$OS" = "Windows_NT" ] 2>/dev/null; then
   if command -v powershell >/dev/null 2>&1; then
-    powershell -NoProfile -ExecutionPolicy Bypass -Command "iex ((New-Object System.Net.WebClient).DownloadString('$RAW_BASE/install.ps1'))"
+    powershell -NoProfile -ExecutionPolicy Bypass -Command "& { iex ((New-Object Net.WebClient).DownloadString('$RAW_BASE/install.ps1')) }"
     exit $?
   elif command -v pwsh >/dev/null 2>&1; then
-    pwsh -NoProfile -ExecutionPolicy Bypass -Command "iex ((New-Object System.Net.WebClient).DownloadString('$RAW_BASE/install.ps1'))"
+    pwsh -NoProfile -ExecutionPolicy Bypass -Command "& { iex ((New-Object Net.WebClient).DownloadString('$RAW_BASE/install.ps1')) }"
     exit $?
   fi
 fi
 
+# Unix/Linux/macOS installer
 TARGET_DIR="./dsa-pr"
 
 FILES=(
@@ -68,7 +74,7 @@ read_input() {
   elif [ -t 0 ]; then
     read -p "$prompt" "$var"
   else
-    read -p "$prompt" "$var" </dev/stdin 2>/dev/null || { echo -n "$prompt"; read "$var"; }
+    read -p "$prompt" "$var" </dev/stdin 2>/dev/null || printf "%s" "$prompt" >&2; read "$var"
   fi
 }
 
@@ -136,10 +142,7 @@ case "$choice" in
     for i in "${!FILES[@]}"; do
       file="${FILES[$i]}"
       dest="$TARGET_DIR/$file"
-      if [ -f "$dest" ]; then
-        echo "[SKIP] $file already exists"
-        continue
-      fi
+      [ -f "$dest" ] && echo "[SKIP] $file already exists" && continue
       download_file "$RAW_BASE/$file" "$dest" || failed=$((failed+1))
     done
     echo ""
@@ -177,11 +180,7 @@ case "$choice" in
       echo "[DONE] Saved files at: $dest"
       exit 0
     fi
-    if download_file "$RAW_BASE/$file" "$dest"; then
-      echo "[DONE] Saved files at: $TARGET_DIR/"
-    else
-      exit 1
-    fi
+    download_file "$RAW_BASE/$file" "$dest" && echo "[DONE] Saved files at: $TARGET_DIR/" || exit 1
     ;;
   *)
     echo "[ERROR] Invalid choice."
